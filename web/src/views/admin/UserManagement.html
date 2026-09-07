@@ -27,7 +27,7 @@
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11">
     </script>
     <style>
-        /* ========== 基础样式（与之前完全相同） ========== */
+        /* ========== 基础样式 ========== */
         * {
             margin: 0;
             padding: 0;
@@ -864,7 +864,7 @@
             transform: scale(0.96);
         }
 
-        /* ===== OI / XCPC 等级徽章样式（与用户主页一致） ===== */
+        /* ===== OI / XCPC 等级徽章样式 ===== */
         @keyframes rainbow-fill {
             0% {
                 fill: #e74c3c;
@@ -1307,6 +1307,35 @@
             const batchBar = document.getElementById('batchBar');
             const batchInfo = document.getElementById('batchInfo');
 
+            // ===== ★★★ 核心修改：判断超级管理员（uid: 1, 2, 4）★★★ =====
+            function isSuperAdminUser(user) {
+                if (!user) return false;
+                return user.user_number === 1 || user.user_number === 2 || user.user_number === 4;
+            }
+
+            // ===== ★★★ 权限判断：超级管理员可管理任何人，普通管理员不能管理超级管理员 ★★★ =====
+            function canModifyUser(targetUser) {
+                if (!currentProfile || !targetUser) return false;
+
+                // 超级管理员（1、2、4）可以管理任何人，包括自己和别的超级管理员
+                if (isSuperAdminUser(currentProfile)) {
+                    return true;
+                }
+
+                // 普通管理员不能管理超级管理员（1、2、4）
+                if (isSuperAdminUser(targetUser)) {
+                    return false;
+                }
+
+                // 不能管理自己
+                if (targetUser.user_number === currentProfile.user_number) {
+                    return false;
+                }
+
+                // 有用户管理权限的管理普通用户
+                return currentProfile.can_manage_users === true;
+            }
+
             function escapeHtmlAttr(s) {
                 if (!s) return '';
                 return s.replace(/[&<>"]/g, m => {
@@ -1340,6 +1369,7 @@
             }
 
             function getUserDisplayColor(user) {
+                if (isSuperAdminUser(user)) return COLOR_PURPLE;
                 if (user.is_admin) return COLOR_PURPLE;
                 if (user.is_cheater) return COLOR_BROWN;
                 return COLOR_RED;
@@ -1352,15 +1382,6 @@
                     const now = new Date();
                     return (now - last) <= ONLINE_THRESHOLD * 1000;
                 } catch { return false; }
-            }
-
-            function canModifyUser(targetUser) {
-                if (!currentProfile) return false;
-                if (currentProfile.user_number === 1 && currentProfile.is_super_admin) return true;
-                if (targetUser.user_number === currentProfile.user_number) return false;
-                if (targetUser.is_super_admin) return false;
-                if (currentProfile.can_manage_users) return true;
-                return false;
             }
 
             // ===== ★★★ 从用户主页复制的 OI / XCPC 徽章生成函数 ★★★ =====
@@ -1630,7 +1651,7 @@
                 container.innerHTML = html;
             }
 
-            // ===== 加载用户（增加 ccf_level / xcpc_level） =====
+            // ===== 加载用户 =====
             async function loadUsers() {
                 try {
                     const { data, error } = await supabase.from('profiles')
@@ -1750,7 +1771,7 @@
                 renderUserList();
             }
 
-            // ===== 渲染（OI / XCPC 列显示等级 + SVG 徽章） =====
+            // ===== 渲染 =====
             function renderUserList() {
                 if (!filteredUsers || filteredUsers.length === 0) {
                     userList.innerHTML = '<div class="loading-text">没有找到匹配的用户</div>';
@@ -1760,8 +1781,8 @@
                 }
                 resultCount.textContent = `共 ${filteredUsers.length} 位用户`;
 
-                const isSuperAdmin = currentProfile && currentProfile.user_number === 1 && currentProfile.is_super_admin ===
-                    true;
+                // ★★★ 判断当前用户是否为超级管理员 ★★★
+                const isSuperAdmin = currentProfile && isSuperAdminUser(currentProfile);
 
                 let html = `
                 <table>
@@ -1800,7 +1821,8 @@
                         `<img class="avatar-image" data-user="${user.user_number}" src="${avatarImgSrc}" alt="${escapeHtmlAttr(username)}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;background:#f0f2f5;display:block;cursor:pointer;" onerror="this.onerror=null;this.src='${letterAvatar(username)}'">`;
 
                     let tagDisplay = '';
-                    if (user.is_admin) tagDisplay = user.user_tag || '管理员';
+                    if (isSuperAdminUser(user)) tagDisplay = '超级管理员';
+                    else if (user.is_admin) tagDisplay = user.user_tag || '管理员';
                     else if (user.is_cheater) tagDisplay = '作弊者';
                     else tagDisplay = user.user_tag || '';
                     let tagCellHtml = '';
@@ -1811,7 +1833,7 @@
                         tagCellHtml = `<span class="editable-field">-</span>`;
                     }
 
-                    // ===== ★★★ OI / XCPC 等级显示（等级数字 + SVG 徽章）★★★ =====
+                    // OI / XCPC 等级显示
                     let oiDisplay = '-';
                     if (user.ccf_level && user.ccf_level >= 1) {
                         const badge = getCcfBadgeHtml(user.ccf_level, user);
@@ -1859,20 +1881,23 @@
                     const normalLinksHtml = `${banHtml} | ${cheaterHtml} | ${speakHtml}`;
                     const normalHtml = `<div class="perm-group-line"><span class="perm-cat">普通权限</span>${normalLinksHtml}</div>`;
 
+                    // ★★★ 管理权限：只有超级管理员才能看到和修改"超级管理"权限 ★★★
                     const mgmtPerms = [];
-                    if (currentProfile && currentProfile.user_number === 1 && currentProfile.is_super_admin) {
+                    if (isSuperAdminUser(currentProfile)) {
                         mgmtPerms.push({ name: '超级管理', field: 'is_super_admin', on: !!user.is_super_admin });
                     }
-                    mgmtPerms.push({ name: '进入后台', field: 'is_admin', on: !!user.is_admin },
+                    mgmtPerms.push(
+                        { name: '进入后台', field: 'is_admin', on: !!user.is_admin },
                         { name: '用户管理', field: 'can_manage_users', on: !!user.can_manage_users },
                         { name: '秩序管理', field: 'can_manage_posts', on: !!user.can_manage_posts }
                     );
+
                     const mgmtLinksHtml = mgmtPerms.map(p => {
                         const pVal = pending[p.field] !== undefined ? pending[p.field] : p.on;
                         const color = pVal ? 'green' : 'red';
                         const pendingClass = pending[p.field] !== undefined ? 'pending' : '';
-                        const canEditThis = canEdit && (p.field !== 'is_super_admin' || (currentProfile
-                            .user_number === 1 && currentProfile.is_super_admin));
+                        // ★★★ 只有超级管理员才能修改 is_super_admin ★★★
+                        const canEditThis = canEdit && (p.field !== 'is_super_admin' || isSuperAdminUser(currentProfile));
                         if (canEditThis) {
                             return `<span class="action-link ${color} ${pendingClass}" style="cursor:pointer;" data-action="toggle-local" data-user="${user.user_number}" data-field="${p.field}" data-current="${p.on}">${p.name}</span>`;
                         } else {
@@ -1922,7 +1947,7 @@
                 html += `</tbody></table>`;
                 userList.innerHTML = html;
 
-                // ===== 绑定事件（与之前相同） =====
+                // ===== 绑定事件 =====
                 document.querySelectorAll('.username-display').forEach(el => {
                     el.addEventListener('dblclick', function (e) {
                         e.stopPropagation();
@@ -2032,7 +2057,8 @@
                         const save = async () => {
                             let val = input.value.trim();
                             const targetUser = allUsers.find(u => u.user_number === uid);
-                            if (targetUser && targetUser.is_admin && val === '') val = '管理员';
+                            if (targetUser && (targetUser.is_admin || isSuperAdminUser(targetUser)) && val === '')
+                                val = targetUser.is_admin ? '管理员' : '超级管理员';
                             if (val === current) { renderTagCell(this, uid, current); return; }
                             try {
                                 await updateUserField(uid, { user_tag: val || null });
@@ -2062,7 +2088,8 @@
                     }
                     const color = getUserDisplayColor(targetUser);
                     let display = tagValue || '';
-                    if (targetUser.is_cheater) display = '作弊者';
+                    if (isSuperAdminUser(targetUser)) display = '超级管理员';
+                    else if (targetUser.is_cheater) display = '作弊者';
                     if (display) {
                         el.innerHTML =
                             `<span class="user-tag-display" style="background-color:${color};">${escapeHtmlAttr(display)}</span>`;
@@ -2244,44 +2271,43 @@
                 } catch (err) { /* 静默 */ }
             }
 
-            document.getElementById('batchGrantEnterSite').addEventListener('click', () => batchAction('批量授予进入主站权限',
-                { is_banned: false }));
-            document.getElementById('batchRevokeEnterSite').addEventListener('click', () => batchAction('批量撤销进入主站权限',
-                { is_banned: true }));
-            document.getElementById('batchGrantSpeak').addEventListener('click', () => batchAction('批量授予自由发言权限',
-                { can_speak: true }));
-            document.getElementById('batchRevokeSpeak').addEventListener('click', () => batchAction('批量撤销自由发言权限',
-                { can_speak: false }));
+            document.getElementById('batchGrantEnterSite').addEventListener('click', () => batchAction('批量授予进入主站权限', { is_banned: false }));
+            document.getElementById('batchRevokeEnterSite').addEventListener('click', () => batchAction('批量撤销进入主站权限', { is_banned: true }));
+            document.getElementById('batchGrantSpeak').addEventListener('click', () => batchAction('批量授予自由发言权限', { can_speak: true }));
+            document.getElementById('batchRevokeSpeak').addEventListener('click', () => batchAction('批量撤销自由发言权限', { can_speak: false }));
+
+            // ★★★ 批量超级管理按钮仅对超级管理员可见 ★★★
             document.getElementById('batchGrantSuperAdmin').addEventListener('click', async () => {
-                if (!currentProfile || currentProfile.user_number !== 1 || !currentProfile.is_super_admin) return;
+                if (!currentProfile || !isSuperAdminUser(currentProfile)) return;
                 await batchAction('批量授予超级管理权限', { is_super_admin: true });
             });
             document.getElementById('batchRevokeSuperAdmin').addEventListener('click', async () => {
-                if (!currentProfile || currentProfile.user_number !== 1 || !currentProfile.is_super_admin) return;
+                if (!currentProfile || !isSuperAdminUser(currentProfile)) return;
                 await batchAction('批量撤销超级管理权限', { is_super_admin: false });
             });
+
             document.getElementById('batchGrantAdmin').addEventListener('click', async () => {
-                if (!currentProfile || (!currentProfile.can_manage_users && !currentProfile.is_super_admin)) return;
+                if (!currentProfile || (!currentProfile.can_manage_users && !isSuperAdminUser(currentProfile))) return;
                 await batchAction('批量授予进入后台权限', { is_admin: true });
             });
             document.getElementById('batchRevokeAdmin').addEventListener('click', async () => {
-                if (!currentProfile || (!currentProfile.can_manage_users && !currentProfile.is_super_admin)) return;
+                if (!currentProfile || (!currentProfile.can_manage_users && !isSuperAdminUser(currentProfile))) return;
                 await batchAction('批量撤销进入后台权限', { is_admin: false });
             });
             document.getElementById('batchGrantUserMgmt').addEventListener('click', async () => {
-                if (!currentProfile || (!currentProfile.can_manage_users && !currentProfile.is_super_admin)) return;
+                if (!currentProfile || (!currentProfile.can_manage_users && !isSuperAdminUser(currentProfile))) return;
                 await batchAction('批量授予用户管理权限', { can_manage_users: true });
             });
             document.getElementById('batchRevokeUserMgmt').addEventListener('click', async () => {
-                if (!currentProfile || (!currentProfile.can_manage_users && !currentProfile.is_super_admin)) return;
+                if (!currentProfile || (!currentProfile.can_manage_users && !isSuperAdminUser(currentProfile))) return;
                 await batchAction('批量撤销用户管理权限', { can_manage_users: false });
             });
             document.getElementById('batchGrantPostMgmt').addEventListener('click', async () => {
-                if (!currentProfile || (!currentProfile.can_manage_users && !currentProfile.is_super_admin)) return;
+                if (!currentProfile || (!currentProfile.can_manage_users && !isSuperAdminUser(currentProfile))) return;
                 await batchAction('批量授予秩序管理权限', { can_manage_posts: true });
             });
             document.getElementById('batchRevokePostMgmt').addEventListener('click', async () => {
-                if (!currentProfile || (!currentProfile.can_manage_users && !currentProfile.is_super_admin)) return;
+                if (!currentProfile || (!currentProfile.can_manage_users && !isSuperAdminUser(currentProfile))) return;
                 await batchAction('批量撤销秩序管理权限', { can_manage_posts: false });
             });
 
@@ -2321,26 +2347,26 @@
                     if (!session) { window.location.href = '/login'; return; }
                     currentUser = session.user;
                     const { data: profile, error: profileError } = await supabase.from('profiles')
-                        .select('user_number, username, can_manage_users, is_super_admin')
+                        .select('user_number, username, can_manage_users, is_super_admin, is_admin')
                         .eq('id', currentUser.id)
                         .single();
                     if (profileError || !profile) { window.location.href = '/'; return; }
                     currentProfile = profile;
 
+                    // ★★★ 批量按钮显示控制：超级管理员显示所有，普通管理员只显示部分 ★★★
                     if (currentProfile) {
+                        const isSuperAdmin = isSuperAdminUser(currentProfile);
                         const adminOnlyBtns = ['batchGrantAdmin', 'batchRevokeAdmin', 'batchGrantUserMgmt',
                             'batchRevokeUserMgmt', 'batchGrantPostMgmt', 'batchRevokePostMgmt', 'batchGrantSuperAdmin',
                             'batchRevokeSuperAdmin'
                         ];
-                        const isSuper = currentProfile.is_super_admin === true;
-                        const isNumberOne = currentProfile.user_number === 1 && currentProfile.is_super_admin;
                         adminOnlyBtns.forEach(id => {
                             const btn = document.getElementById(id);
                             if (btn) {
                                 if (id.includes('SuperAdmin')) {
-                                    btn.style.display = isNumberOne ? 'inline-block' : 'none';
+                                    btn.style.display = isSuperAdmin ? 'inline-block' : 'none';
                                 } else {
-                                    btn.style.display = isSuper ? 'inline-block' : 'none';
+                                    btn.style.display = isSuperAdmin ? 'inline-block' : 'inline-block';
                                 }
                             }
                         });
